@@ -58,6 +58,8 @@ export interface VariantGeo {
   lcdLabelFont?: number;
   lcdValueFont?: number;
   unsupported?: boolean;
+  /* External spool: there is no housing photo; a spool holder is drawn in vector instead */
+  holder?: boolean;
 }
 
 const VB_DEFAULT: [number, number, number, number] = [0, 0, 700, 360];
@@ -89,6 +91,31 @@ const AMS_LIKE: Pick<
   fade: "a2p",
   vb: VB_DEFAULT,
   mech: true,
+};
+
+/* External spool geometry: the spool sits on the holder's shaft, fully visible */
+const EXT_SPOOL: Pick<
+  VariantGeo,
+  "spW" | "spH" | "spY" | "flangeFrac" | "bandCY" | "matCap" | "labelY" | "fade"
+> = {
+  spW: 101,
+  spH: 226,
+  spY: 70,
+  flangeFrac: 0.075,
+  bandCY: 183,
+  matCap: 0.9,
+  labelY: 328,
+  fade: "none",
+};
+
+/* Holder artwork positions, in canvas units (see render.ts holderBackSvg) */
+export const HOLDER = {
+  plateW: 190,
+  plateY: 60,
+  plateH: 248,
+  shaftY: 174,
+  shaftH: 14,
+  textY: 27,
 };
 
 export const VARIANTS: { [key: string]: VariantGeo } = {
@@ -137,6 +164,25 @@ export const VARIANTS: { [key: string]: VariantGeo } = {
     lcdLabelFont: 8,
     lcdValueFont: 14,
   },
+  /* External spool on its holder. One spool, drawn in full (no housing, so no fade or clip).
+     The single view crops the 700 x 360 canvas around one holder, like AMS HT does. */
+  ext: {
+    name: "External spool",
+    base: "",
+    holder: true,
+    ...EXT_SPOOL,
+    centers: [130],
+    vb: [340, 0, 260, 360],
+  },
+  /* Both external spools of a dual-nozzle printer (H2D, H2C, X2D, ...) side by side */
+  ext2: {
+    name: "External spools",
+    base: "",
+    holder: true,
+    ...EXT_SPOOL,
+    centers: [230, 470],
+    vb: VB_DEFAULT,
+  },
   lite: {
     name: "AMS Lite",
     base: "ams2",
@@ -169,6 +215,7 @@ export const FADE_STOPS: [number, number][] = [
 /* Pick the geometry table from the device model string */
 export function variantFromModel(model: string): string {
   const m = String(model || "").toLowerCase();
+  if (/external[\s_-]*spool/.test(m)) return "ext";
   if (/\bams[\s_-]*3h\b/i.test(m)) return "ams3h";
   if (m.includes("lite")) return "lite";
   if (m.includes("ht")) return "ht";

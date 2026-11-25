@@ -41,3 +41,15 @@ export function findTrayEntities(hass: any, entityIds: string[]): string[] {
     .sort((a, b) => a.slot - b.slot)
     .map((t) => t.id);
 }
+
+/** The external spool sensor among a device's entities, if there is one. */
+export function findExternalSpoolEntity(hass: any, entityIds: string[]): string {
+  return (
+    entityIds.find((id) => {
+      const entry = hass?.entities?.[id];
+      return entry?.platform === "bambu_lab" && entry?.translation_key === "external_spool";
+    }) ||
+    entityIds.find((id) => /_external_spool$/.test(id) && hass?.states?.[id]) ||
+    ""
+  );
+}

@@ -18,7 +18,7 @@ import {
   TRANSLUCENT_COLOR,
 } from "./geo";
 import { renderSvg } from "./render";
-import { findTrayEntities } from "./trays";
+import { findExternalSpoolEntity, findTrayEntities } from "./trays";
 import {
   connectedNozzleLabel,
   findConnectedNozzleEntity,
@@ -28,7 +28,7 @@ registerCustomCard({
   type: AMS_GRAPHIC_CARD_NAME,
   name: "Bambu Lab AMS Graphic Card",
   description:
-    "Spool status for AMS / AMS 2 PRO / AMS HT / AMS-3H with graphic spool rendering (fill level, glass overlay, labels)",
+    "Spool status for AMS / AMS 2 PRO / AMS HT / AMS-3H and external spools with graphic spool rendering (fill level, glass overlay, labels)",
 });
 
 const ICON_TEMP =
@@ -73,6 +73,7 @@ export class AmsGraphicCard extends LitElement {
       show_labels: true,
       label_mode: "type",
       show_empty_label: false,
+      pair_external: true,
       ...config,
       trays,
     };
@@ -112,7 +113,8 @@ export class AmsGraphicCard extends LitElement {
     if (this._resolve().variantKey === "ams3h")
       return { grid_rows: 5, grid_columns: 6, grid_min_rows: 5, grid_min_columns: 6 };
     const rows = this.getCardSize();
-    const columns = this._resolve().variantKey === "ht" ? 1 : 4;
+    const key = this._resolve().variantKey;
+    const columns = key === "ht" || key === "ext" ? 1 : 4;
     return {
       grid_rows: rows,
       grid_columns: columns,
@@ -163,7 +165,9 @@ export class AmsGraphicCard extends LitElement {
       nozzleEntity: undefined,
     };
     const dev = cfg.ams && hass && hass.devices ? hass.devices[cfg.ams] : null;
-    if (dev) {
+    if (dev && variantFromModel(dev.model) === "ext") {
+      this._resolveExternal(r, dev);
+    } else if (dev) {
       r.variantKey = variantFromModel(amsDeviceModel(dev, hass));
       r.deviceName = dev.name_by_user || dev.name || "";
       r.geo = VARIANTS[r.variantKey] || VARIANTS.ams2pro;
@@ -189,6 +193,31 @@ export class AmsGraphicCard extends LitElement {
     }
     if (!r.trays.length) r.trays = (cfg.trays || []).filter(Boolean);
     return r;
+  }
+
+  /* External spool: one holder, or both holders of a dual-nozzle printer side by side.
+     The printer's external spool devices are its children with the "External Spool" model;
+     ExternalSpool sorts before ExternalSpool2, which the integration uses for the left and the
+     right holder. */
+  private _resolveExternal(r: any, dev: any): void {
+    const hass = this._hass;
+    const cfg = this._config || {};
+    const siblings = Object.values<any>(hass.devices || {})
+      .filter(
+        (d) =>
+          d.via_device_id &&
+          d.via_device_id === dev.via_device_id &&
+          variantFromModel(d.model) === "ext"
+      )
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const sides = siblings.length >= 2 ? ["Left", "Right"] : [];
+    const pair = siblings.length >= 2 && cfg.pair_external !== false;
+    const devices = pair ? siblings.slice(0, 2) : [dev];
+    r.variantKey = pair ? "ext2" : "ext";
+    r.geo = VARIANTS[r.variantKey];
+    r.deviceName = dev.name_by_user || dev.name || "";
+    r.trays = devices.map((d: any) => findExternalSpoolEntity(hass, this._deviceEntities(d.id)));
+    r.holderLabels = pair ? sides : [sides.length ? sides[siblings.indexOf(dev)] || "" : ""];
   }
 
   private _slot(entityId: string): Slot {
@@ -279,9 +308,11 @@ export class AmsGraphicCard extends LitElement {
     if (!showTitle && t === nothing && h === nothing && n === nothing) return nothing;
     return html`<div class="head ${r.variantKey === "ht" ? "center" : ""}">
       ${showTitle ? html`<div class="title">${cfg.subtitle}</div>` : nothing}
-      ${t === nothing && h === nothing && n === nothing
-        ? nothing
-        : html`<div class="info">${n}${t}${h}</div>`}
+      ${
+        t === nothing && h === nothing && n === nothing
+          ? nothing
+          : html`<div class="info">${n}${t}${h}</div>`
+      }
     </div>`;
   }
 
@@ -300,13 +331,14 @@ export class AmsGraphicCard extends LitElement {
     if (r.geo.unsupported) {
       return html`<ha-card>
         <div class="notice">
-          ${r.geo.name} is not supported yet — supported models: AMS / AMS 2 PRO / AMS HT.
+          ${r.geo.name} is not supported yet — supported models: AMS / AMS 2 PRO / AMS HT / AMS-3H /
+          external spool.
         </div>
       </ha-card>`;
     }
-    if (!r.trays.length) {
+    if (!r.trays.filter(Boolean).length) {
       return html`<ha-card>
-        <div class="notice">Select an AMS in the card editor.</div>
+        <div class="notice">Select an AMS or external spool in the card editor.</div>
       </ha-card>`;
     }
 
@@ -323,6 +355,7 @@ export class AmsGraphicCard extends LitElement {
       emptyLabels: r.trays.map((id: string) => getEmptyTrayLabel(this._hass, id)),
       hum: hum === "" ? "--" : `${hum}${this._unit(r.humEntity) === "%" ? "%" : ""}`,
       temp: temp === "" ? "--" : `${temp}°`,
+      holderLabels: r.holderLabels,
     });
 
     return html`<ha-card @click=${this._onCardClick}>${this._head(r)}${unsafeSVG(svg)}</ha-card>`;
@@ -335,8 +368,7 @@ export class AmsGraphicCard extends LitElement {
     const label = ev
       .composedPath()
       .find((n) => n instanceof Element && n.hasAttribute("data-tray-entity")) as
-      | Element
-      | undefined;
+      Element | undefined;
     if (!label) return;
     ev.stopPropagation();
     this._openFilamentPopup(label.getAttribute("data-tray-entity") || "");

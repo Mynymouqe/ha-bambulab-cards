@@ -11,6 +11,7 @@ import {
   chipWidth,
   esc,
   FADE_STOPS,
+  HOLDER,
   LABEL_FONT,
   PCT_FONT,
   remainPct,
@@ -129,6 +130,52 @@ function lcdSvg(geo: VariantGeo, hum: string, temp: string): string {
   return o;
 }
 
+/* External spool holder, drawn in vector (there is no product photo for it). Everything behind
+   the spool: the printer's side panel, a mounting plate per spool, the filament guide with its
+   PTFE tube, the shaft, and a dashed outline where an empty holder's spool would go. */
+function holderBackSvg(geo: VariantGeo, slots: Slot[], labels: string[]): string {
+  const [vbx, vby, vbw, vbh] = geo.vb;
+  const f = (v: number) => Number(v.toFixed(2));
+  const { plateW, plateY, plateH, shaftY, shaftH, textY } = HOLDER;
+  let o = "";
+  o += `<rect x="${f(vbx + 8)}" y="${f(vby + 8)}" width="${f(vbw - 16)}" height="${f(vbh - 16)}" rx="22" fill="#3c3f43"/>`;
+  o += `<rect x="${f(vbx + 8)}" y="${f(vby + 8)}" width="${f(vbw - 16)}" height="26" rx="13" fill="#46494e"/>`;
+  geo.centers.forEach((c, i) => {
+    const cx = c + vbx;
+    const s = slots[i];
+    const loaded = !!s && !s.empty;
+    const label = labels[i] || "";
+    if (label) {
+      o += `<text x="${f(cx)}" y="${textY}" font-size="15" fill="#9aa0a6" text-anchor="middle" letter-spacing="1.5">${esc(label)}</text>`;
+    }
+    o += `<rect x="${f(cx - plateW / 2)}" y="${plateY}" width="${plateW}" height="${plateH}" rx="16" fill="#2b2d30" stroke="#222326"/>`;
+    /* Filament guide on the plate's top edge, its PTFE tube leaving to the side and up */
+    const gy = plateY - 20;
+    o += `<path d="M${f(cx + 24)} ${gy + 11} C${f(cx + 58)} ${gy + 11} ${f(cx + 66)} ${gy - 8} ${f(cx + 86)} ${vby + 12}" stroke="#e9edf0" stroke-opacity="0.45" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+    o += `<rect x="${f(cx - 26)}" y="${gy}" width="52" height="22" rx="5" fill="#1d1e20"/>`;
+    o += `<circle cx="${f(cx + 16)}" cy="${gy + 11}" r="3.5" fill="${loaded ? "#4cd964" : "#55595e"}"/>`;
+    o += `<rect x="${f(cx - plateW / 2 + 7)}" y="${shaftY}" width="${plateW - 14}" height="${shaftH}" rx="${shaftH / 2}" fill="#8d949b"/>`;
+    if (!loaded) {
+      o += `<rect x="${f(cx - geo.spW / 2)}" y="${geo.spY}" width="${geo.spW}" height="${geo.spH}" rx="6" fill="none" stroke="#6b7075" stroke-width="2" stroke-dasharray="7 5"/>`;
+    }
+  });
+  return o;
+}
+
+/* In front of the spool: the shaft's end caps, either side of it */
+function holderFrontSvg(geo: VariantGeo): string {
+  const f = (v: number) => Number(v.toFixed(2));
+  const { plateW, shaftY, shaftH } = HOLDER;
+  let o = "";
+  geo.centers.forEach((c) => {
+    const cx = c + geo.vb[0];
+    for (const x of [cx - plateW / 2 + 3, cx + plateW / 2 - 13]) {
+      o += `<rect x="${f(x)}" y="${shaftY - 6}" width="10" height="${shaftH + 12}" rx="3" fill="#b8bec4" style="pointer-events:none"/>`;
+    }
+  });
+  return o;
+}
+
 export interface RenderOpts {
   geo: VariantGeo;
   slots: Slot[];
@@ -139,6 +186,7 @@ export interface RenderOpts {
   emptyLabels: string[]; // text drawn on each slot when empty (only when showEmptyLabel is on)
   hum: string;
   temp: string;
+  holderLabels?: string[]; // external spool only: the text above each holder (Left / Right)
 }
 
 export function renderSvg(o: RenderOpts): string {
@@ -167,8 +215,10 @@ export function renderSvg(o: RenderOpts): string {
   }
   svg += "</defs>";
 
-  /* (1) base image */
-  svg += `<image href="${esc(baseSrc)}" x="0" y="0" width="${IMG_W}" height="${IMG_H}" preserveAspectRatio="none"/>`;
+  /* (1) base image, or the drawn holder for an external spool */
+  if (geo.holder) svg += holderBackSvg(geo, slots, o.holderLabels || []);
+  else
+    svg += `<image href="${esc(baseSrc)}" x="0" y="0" width="${IMG_W}" height="${IMG_H}" preserveAspectRatio="none"/>`;
 
   /* (2) spools (fade mask or occlusion clip, depending on the model) */
   if (geo.fade === "a2p") svg += '<g mask="url(#a2p-mask)">';
@@ -178,6 +228,7 @@ export function renderSvg(o: RenderOpts): string {
     if (!s.empty && geo.centers[i] != null) svg += spoolSvg(geo.centers[i] + vbx, s, geo);
   });
   svg += "</g>";
+  if (geo.holder) svg += holderFrontSvg(geo);
 
   /* (3) re-draw a strip of the base image above the spools (e.g. the AMS HT silver buckle)
      to restore details the spools covered */
